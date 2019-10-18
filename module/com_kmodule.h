@@ -2,7 +2,6 @@
 #define COM_KMODULE_H
 
 #include <linux/module.h>
-
 struct mailbox
 {
     //0: unqueued
@@ -18,6 +17,11 @@ struct msg_data
     char buf[256];
     struct msg_data *next;
 };
+
+
+
+
+
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Apple pie");
