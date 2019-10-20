@@ -1,8 +1,9 @@
 CC := gcc
-override CFLAGS += -O3 -Wall
+override CFLAGS += -O3 -Wall -g
 
 SOURCE := com_app.c
 BINARY := com_app
+
 
 GIT_HOOKS := .git/hooks/applied
 
@@ -14,8 +15,11 @@ debug: $(GIT_HOOKS) $(BINARY)
 $(GIT_HOOKS):
 	scripts/install-git-hooks
 
+
+
 $(BINARY): $(SOURCE) $(patsubst %.c, %.h, $(SOURCE))
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -I./include -c console.c
+	$(CC) $(CFLAGS) $< -I./include -o $@ console.o
 
 .PHONY: clean
 clean:

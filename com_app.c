@@ -1,54 +1,85 @@
-#include "com_app.h"
 #include <stdio.h>
 #include <malloc.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <signal.h>
+#include "com_app.h"
 
-#define MAX_PAYLOAD 1024
+void init_app()
+{
+    init_cmd();
+    add_cmd("Send", do_send_cmd, "Send [id] [message]| Send to kernel with [id] and [message]");
+    add_cmd("Recv", do_recv_cmd, "Recv               | Receive message from kernel ");
+}
+extern int errno;
+
+bool registration_call()
+{
+    struct sockaddr_nl dest_addr;
+    struct nlmsghdr *nlh;
+    struct iovec iov;
+    struct msghdr msg;
+    gen_hdr(&dest_addr, &nlh, &iov, &msg);
+    int argc = 3;
+    char** argv = calloc(argc,sizeof(char*));
+    argv[0] = "Registration.";
+    argv[1] = malloc(strlen(id_str)+4);
+    memset(argv[1], '\0', strlen(id_str)+4);
+    strcat(argv[1], "id=");
+    strcat(argv[1], id_str);
+    argv[2] = malloc(strlen(type) + 6);
+    memset(argv[2], '\0', sizeof(strlen(type)+6));
+    strcat(argv[2], "type=");
+    strcat(argv[2], type);
+
+    strcpy(NLMSG_DATA(nlh), gen_str_src(argc, argv));
+    int err = sendmsg(sock_fd, &msg, 0);
+    if(err == -1)
+    {
+        printf("Fail to register to kernel module\n");
+        printf("%d\n", errno);
+        return false;
+    }
+    recvmsg(sock_fd, &msg, 0);
+    recvecho((char*)NLMSG_DATA(msg.msg_iov->iov_base));
+    if(strcmp((char*)NLMSG_DATA(msg.msg_iov->iov_base), "Fail") == 0)
+        return false;
+    return true;
+}
+
+void handle_sigint(int sig)
+{
+    if( do_unmount_cmd())
+    {
+        printf("Application %d closed\n", id);
+        exit(0);
+    }
+}
+
 
 int main(int argc, char *argv[])
 {
-    struct sockaddr_nl src_addr, dest_addr;
-    struct nlmsghdr *nlh = NULL;
-    struct iovec iov;
-    int sock_fd;
-    struct msghdr msg;
 
-    sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_USERSOCK);
-    memset(&src_addr, 0, sizeof(src_addr));
-    src_addr.nl_family = AF_NETLINK;
-    src_addr.nl_pid = getpid(); /* Self pid */
-    src_addr.nl_groups = 0; /* not in mcast groups*/
-    bind(sock_fd, (struct sockaddr*)&src_addr, sizeof(src_addr));
-
-    memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.nl_family = AF_NETLINK;
-    dest_addr.nl_pid = 0; /* For linux kernel */
-    dest_addr.nl_groups = 0; /* unicast */
-
-    nlh = (struct nlmsghdr*) malloc(NLMSG_SPACE(MAX_PAYLOAD));
-    nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
-    nlh->nlmsg_pid = getpid();
-    nlh->nlmsg_flags = 0;
-    strcpy(NLMSG_DATA(nlh), "Fuck you!");
-    printf("Test string %s\n", NLMSG_DATA(nlh));
-    iov.iov_base = (void*) nlh;
-    iov.iov_len = nlh->nlmsg_len;
-    msg.msg_name = (void*) &dest_addr;
-    msg.msg_namelen = sizeof(dest_addr);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-
-    // if(sendmsg(sock_fd, &msg, 0) == -1){
-    //   printf("Send failed\n");
-    //   return -1;
-    // }
-    sendmsg(sock_fd,&msg, 0);
-    recvmsg(sock_fd, &msg, 0);
-
-    printf("Received message payload: %s\n", (char*)NLMSG_DATA(msg.msg_iov->iov_base));
+    signal(SIGINT, handle_sigint);
+    id = atoi(argv[1]);
+    id_str = argv[1];
+    type = argv[2];
+    printf("Id: %d\n", id);
+    printf("Type: %s\n", type);
+    bool ok = true;
+    if(ini_sock() == -1)
+    {
+        printf("Socket build failed\n");
+        return -1;
+    }
+    ok = ok && registration_call();
+    init_app();
+    ok = ok && run_console();
+    ok = ok && finish_cmd();
     close(sock_fd);
-    return 0;
+    return ok ? 0 : 1;
 }

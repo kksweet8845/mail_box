@@ -1,44 +1,37 @@
 #include <ctype.h>
 #include <fcntl.h>
-#include <inttypes.h>
-#include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/select.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-
+#include <linux/string.h>
+#include <linux/unistd.h>
+#include <malloc.h>
 #include "console.h"
 
 /* Some global values */
 static cmd_ptr cmd_list = NULL;
-static bool block_flag = false;
-static bool prompt_flag = true;
 
+static bool prompt_flag = true;
 static bool quit_flag = false;
 static char *prompt = "cmd>";
+int fd_max = 0;
 
-
-bool do_send_cmd(int argc, char *argv[]);
 bool do_help_cmd(int argc, char *argv[]);
-bool do_log_cmd(int argc, char *argv[]);
 bool do_comment_cmd(int argc, char *argv[]);
 bool do_quit_cmd(int argc, char* argv[]);
-bool do_source_cmd(int argc, char* argv[]);
 
 
 static bool interpret_cmda(int argc, char* argv[]);
 
 /**Some support function */
+
+
 char* strsave(char *s)
 {
+    size_t len;
+    char *ss;
     if(!s)
         return NULL;
-    size_t len = strlen(s);
-    char *ss = malloc(len+1);
+    len = strlen(s);
+    ss = malloc(len+1);
     if(!ss)
         return NULL;
     return strcpy(ss, s);
@@ -54,7 +47,7 @@ void free_block(void *b, size_t bytes)
     free(b);
 }
 
-bool free_string(char* s)
+void free_string(char* s)
 {
     if(s == NULL)
     {
@@ -62,6 +55,7 @@ bool free_string(char* s)
         return;
     }
     free_block((void*) s, strlen(s)+1);
+    return;
 }
 
 void free_array(void *b)
@@ -75,15 +69,13 @@ void free_array(void *b)
 }
 
 
-void init_cmd()
+void init_cmd(void)
 {
     cmd_list = NULL;
     quit_flag = false;
     /* add a some default cmd */
     add_cmd("help", do_help_cmd, "                   | Show documentation");
     add_cmd("quit", do_quit_cmd, "                   | Exit program");
-    add_cmd("source", do_source_cmd,
-            " file           | Read commands from source file");
     add_cmd("#", do_comment_cmd, " cmd arg ...       | Display comment");
 }
 
@@ -91,7 +83,7 @@ void add_cmd(char *name, cmd_function operation, char* documentation)
 {
     /*cmd_ptr which can point to a struct CELE which is a cmd struct type */
     cmd_ptr next_cmd = cmd_list;
-
+    cmd_ptr ele;
     cmd_ptr *last_loc = &cmd_list;
     /**strcmp return value >0 if the first character that does not match has
      * a greater value in ptr1 than ptr2 */
@@ -102,7 +94,7 @@ void add_cmd(char *name, cmd_function operation, char* documentation)
             &(next_cmd->next);
         next_cmd = next_cmd->next;
     }
-    cmd_ptr ele = (cmd_ptr) malloc(sizeof(cmd_ele));
+    ele = (cmd_ele *) malloc(sizeof(cmd_ele));
     ele->name = name;
     ele->operation = operation;
     ele->documentation = documentation;
@@ -118,6 +110,8 @@ char **parse_args(char *line, int*argcp)
      * Replace all white space with null characters
      */
     size_t len = strlen(line);
+    size_t i;
+    char **argv;
     /* First copy into buffer with each substring null-terminated */
     char *buf = malloc(len+1);
     char *src = line;
@@ -148,13 +142,12 @@ char **parse_args(char *line, int*argcp)
         }
     }
     /*Now assemble into array of strings */
-    char **argv = calloc(argc, sizeof(char*));
-    size_t i;
+    argv = calloc(argc, sizeof(char*));
     src = buf;
     for(i=0; i<argc; i++)
     {
         argv[i] = strsave(src);
-        src += strlen(argv[i]+1);
+        src += strlen(argv[i]) + 1;
     }
     *argcp = argc;
     return argv;
@@ -162,9 +155,10 @@ char **parse_args(char *line, int*argcp)
 
 static bool interpret_cmda(int argc, char *argv[])
 {
+    cmd_ptr next_cmd;
     if(argc == 0)
         return true;
-    cmd_ptr next_cmd = cmd_list;
+    next_cmd = cmd_list;
     bool ok = true;
     while(next_cmd && strcmp(argv[0], next_cmd->name) != 0)
         next_cmd = next_cmd->next;
@@ -186,10 +180,11 @@ static bool interpret_cmda(int argc, char *argv[])
 bool interpret_cmd(char *cmdline)
 {
     int argc;
+    char **argv;
     if(quit_flag)
         return false;
 
-    char **argv = parse_args(cmdline, &argc);
+    argv = parse_args(cmdline, &argc);
     bool ok = interpret_cmda(argc, argv);
     int i;
     for(i = 0; i<argc; i++)
@@ -215,10 +210,10 @@ bool do_quit_cmd(int argc, char*argv[])
 bool do_help_cmd(int argc, char* argv[])
 {
     cmd_ptr clist = cmd_list;
-    printf("Commands:\n", argv[0]);
+    printf("Commands: %s\n", argv[0]);
     while(clist)
     {
-        printf("\t%s\t%s", clist->name, clist->documentation);
+        printf("\t%s\t%s\n", clist->name, clist->documentation);
         clist=clist->next;
     }
     return true;
@@ -235,22 +230,52 @@ bool do_comment_cmd(int argc, char* argv[])
     return true;
 }
 
-bool get_int(char *vname, int *loc)
+static char* readline(void)
 {
-    char *end = NULL;
-    long int v = strtol(vname, *end, 0);
-    if(v == LONG_MIN || *end != '\0');
-    return false;
-    *loc = (int) v;
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    read = getline(&line, &len, stdin);
+    if(read != -1)
+    {
+        return line;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+
+
+bool cmd_done()
+{
+    return quit_flag;
+}
+
+bool run_console()
+{
+    char *cmdline;
+    while(!cmd_done())
+    {
+        if(prompt_flag)
+        {
+            printf("%s", prompt);
+            fflush(stdout);
+            prompt_flag = true;
+        }
+        cmdline = readline();
+        interpret_cmd(cmdline);
+        prompt_flag = true;
+    }
     return true;
 }
 
-bool do_source_cmd(int argc, char *argv[])
+bool finish_cmd()
 {
-    if(argc < 2)
+    bool ok = true;
+    if(!quit_flag)
     {
-        printf("No source file given\n");
-        return false;
+        ok = ok && do_quit_cmd(0, NULL);
     }
-    if
+    return ok;
 }
