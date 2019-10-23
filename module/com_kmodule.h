@@ -534,10 +534,13 @@ bool do_send_cmd(int argc, char* argv[])
 {
     bool ok = true;
     int id;
+    /*Valid the format */
+    if(argc < 3)
+        return false;
     char *t = vmalloc(strlen(argv[1]) + 1);
     memset(t, '\0', strlen(argv[1]) + 1);
     strcpy(t, argv[1]);
-    get_int(t, &id); /* The kstrtol must be null-terminated */
+    ok = ok && get_int(t, &id); /* The kstrtol must be null-terminated */
     char* msg = gen_str(argc, argv);
     ok = ok && write_msg(id, msg);
     return ok;
@@ -547,7 +550,7 @@ bool do_recv_cmd(int argc, char* argv[])
 {
     bool ok = true;
     int id;
-    get_int(argv[1], &id);
+    ok = ok && get_int(argv[1], &id);
     recv_flag = true;
     ok = ok && read_msg(id, &glob_msg);
     return ok;
