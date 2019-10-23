@@ -65,6 +65,11 @@ int main(int argc, char *argv[])
 {
 
     signal(SIGINT, handle_sigint);
+    if(argc != 3)
+    {
+        printf("No specified id and type\n");
+        return 1;
+    }
     id = atoi(argv[1]);
     id_str = argv[1];
     type = argv[2];
