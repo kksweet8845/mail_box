@@ -3,3 +3,4 @@ test_data
 
 module/*.ko
 module/*.o
+*.o
